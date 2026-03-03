@@ -5,7 +5,7 @@
 #include "resource_dir.h"	// utility header for SearchAndSetResourceDir
 
 #define GRAVITY 1000.0f
-#define JUMP_SPEED 500.0f
+#define JUMP_SPEED 600.0f
 #define MOVE_SPEED 500.0f
 
 typedef struct Player {
@@ -19,9 +19,10 @@ typedef struct EnvItem {
 	Color color;
 } EnvItem;
 
-void updatePlayer(Player* player, EnvItem* envItems, int envItemsLength, float deltaTime, Sound* sounds, int ground_y);
+void updatePlayer(Player* player, EnvItem* envItems, int envItemsLength, float deltaTime, Sound* sounds, Camera2D* camera);
 void UpdateCameraCenter(Camera2D *camera, Player *player, EnvItem *envItems, int envItemsLength, float delta, int width, int height);
 void UpdateCameraCenterSmoothFollow(Camera2D *camera, Player *player, EnvItem *envItems, int envItemsLength, float delta, int width, int height);
+void resetPlayer(Player* player, Camera2D* camera);
 
 int main ()
 {
@@ -50,7 +51,8 @@ int main ()
 	player.canJump = false;
 
 	EnvItem envItems[] = {
-        {{0, ground_y, screenWidth, 10}, 0, GREEN}
+        {{0, ground_y, screenWidth, 10}, 1, GREEN},
+        {{0, ground_y - 100, screenWidth, 10}, 1, GREEN}
     };
 
     int envItemsLength = sizeof(envItems)/sizeof(envItems[0]);
@@ -76,7 +78,7 @@ int main ()
 	while (!WindowShouldClose())		// run the loop until the user presses ESCAPE or presses the Close button on the window
 	{
 		float deltaTime = GetFrameTime();
-		updatePlayer(&player, envItems, envItemsLength, deltaTime, sounds, ground_y);
+		updatePlayer(&player, envItems, envItemsLength, deltaTime, sounds, &camera);
 
 		camera.zoom += ((float)GetMouseWheelMove()*0.05f);
 
@@ -85,9 +87,7 @@ int main ()
 
 		if (IsKeyPressed(KEY_R))
         {
-            camera.zoom = 1.0f;
-            player.position = (Vector2){ 400, 280 };
-            player.velocity.y = 0.0f;
+            resetPlayer(&player, &camera);
         }
 
         if (IsKeyPressed(KEY_C)) cameraOption = (cameraOption + 1)%cameraUpdatersLength;
@@ -126,10 +126,11 @@ int main ()
 	return 0;
 }
 
-void updatePlayer(Player* player, EnvItem* envItems, int envItemsLength, float deltaTime, Sound* sounds, int ground_y)
+void updatePlayer(Player* player, EnvItem* envItems, int envItemsLength, float deltaTime, Sound* sounds, Camera2D* camera)
 {
 	int width = GetScreenWidth();
 	int height = GetScreenHeight();
+    bool down = false;
 
 	if (IsKeyDown(KEY_LEFT)) 
     {
@@ -145,49 +146,62 @@ void updatePlayer(Player* player, EnvItem* envItems, int envItemsLength, float d
         player->canJump = false;
         PlaySound(sounds[0]);
     }
+    if (IsKeyDown(KEY_DOWN) && player->canJump)
+    {
+        down = true;
+    }
 
-    // player->position.y += player->velocity.y * deltaTime;
-    // player->velocity.y += GRAVITY * deltaTime;
-    
-    // // prevent out of bound
-    // if (player->position.x <= 0 || player->position.x >= width)
-    // {
-    // 	player->canJump = false;
-    // }
-    // else if (player->position.y >= ground_y - player->size.y)
-    // {
-    // 	player->position.y = ground_y - player->size.y;
-    // 	player->velocity.y = 0;
-    // 	player->canJump = true;
-    // }
+    /*
+    1) Apply acceleration -> update velocity
+    2) Predict next position
+    3) Detect collision using old & new position
+    4) Resolve collision
+    5) Commit final position
+    */
 
-    printf("%f\n", player->velocity.y);
-		
+    player->velocity.y += GRAVITY * deltaTime;
+    float newY = player->position.y + player->velocity.y * deltaTime;
     bool hitObstacle = false;
+
+    if (newY > 2000)
+    {
+        resetPlayer(player, camera);
+        return;
+    }
+
     for (int i = 0; i < envItemsLength; i++)
     {
-        EnvItem *ei = envItems + i;
-        Vector2 *p = &(player->position);
-        if (ei->blocking &&
-            ei->rect.x <= p->x &&
-            ei->rect.x + ei->rect.width >= p->x &&
-            ei->rect.y >= p->y &&
-            ei->rect.y <= p->y + player->velocity.y*deltaTime)
+        EnvItem* ei = envItems + i;
+
+        if (!ei->blocking || down)
         {
-            hitObstacle = true;
-            player->velocity.y = 0.0f;  
-            p->y = ei->rect.y - player->size.y;
-            break;
+            continue;
         }
+
+        bool horizontalOverlap = 
+            player->position.x + player->size.x > ei->rect.x &&
+            player->position.x < ei->rect.x + ei->rect.width;
+
+        bool falling = player->velocity.y > 0;
+
+        if (horizontalOverlap && falling)
+        {
+            float playerBottom = newY + player->size.y;
+
+            if (playerBottom >= ei->rect.y &&
+                player->position.y + player->size.y <= ei->rect.y)
+            {
+                hitObstacle = true;
+                player->velocity.y = 0.0f;
+                newY = ei->rect.y - player->size.y;
+                break;
+            }
+        }
+
     }
 
-    if (!hitObstacle)
-    {
-        player->position.y += player->velocity.y*deltaTime;
-        player->velocity.y += GRAVITY*deltaTime;
-        player->canJump = false;
-    }
-    else player->canJump = true;
+    player->position.y = newY;
+    player->canJump = hitObstacle;
 }
 
 void UpdateCameraCenter(Camera2D *camera, Player *player, EnvItem *envItems, int envItemsLength, float delta, int width, int height)
@@ -211,4 +225,11 @@ void UpdateCameraCenterSmoothFollow(Camera2D *camera, Player *player, EnvItem *e
         float speed = fmaxf(fractionSpeed*length, minSpeed);
         camera->target = Vector2Add(camera->target, Vector2Scale(diff, speed*delta/length));
     }
+}
+
+void resetPlayer(Player* player, Camera2D* camera)
+{
+    camera->zoom = 1.0f;
+    player->position = (Vector2){ 400, 280 };
+    player->velocity.y = 0.0f;
 }

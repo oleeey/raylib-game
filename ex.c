@@ -104,7 +104,8 @@ int main(void)
 
     // Main game loop
     while (!WindowShouldClose())
-    {        // Update
+    {
+        // Update
         //----------------------------------------------------------------------------------
         float deltaTime = GetFrameTime();
 
@@ -187,7 +188,7 @@ void UpdatePlayer(Player *player, EnvItem *envItems, int envItemsLength, float d
             ei->rect.y <= p->y + player->speed*delta)
         {
             hitObstacle = true;
-            player->speed = 0.0f;  
+            player->speed = 0.0f;
             p->y = ei->rect.y;
             break;
         }
